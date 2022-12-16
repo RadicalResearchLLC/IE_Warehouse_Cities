@@ -1,7 +1,6 @@
 ---
 title: "IE Ranked Warehouse Jurisdictions"
 format: html
-editor: visual
 project: 
  type: website
  output-dir: docs
@@ -151,9 +150,7 @@ leaflet() %>%
 ```
 
 
-## Methods
-
-Warehouse sizes and locations based on WarehouseCITY v1.10 dataset.
+### Methods
 
 Jurisdictional ranks are based on three factors.
 
@@ -161,10 +158,8 @@ Jurisdictional ranks are based on three factors.
 -   Percent of jurisdiction covered by warehouses (33.3%)
 -   Count of warehouses (16.7%)
 
-Data is freely available upon request.
+### Attribution
 
-## Attribution
+This image is brought to you by [Riverside Neighbors Opposing Warehouses](https://sites.google.com/view/rivnow/home).
 
-This image is brought to you by [Riverside Neighbors Opposing Warehouses](tinyurl.com/rivnow).
-
-![RNOW](www/RNOW.jpg){width="200"}
+![](www/RNOW.jpg){width="200"}
