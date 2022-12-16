@@ -1,0 +1,170 @@
+---
+title: "IE Ranked Warehouse Jurisdictions"
+format: html
+editor: visual
+project: 
+ type: website
+ output-dir: docs
+---
+
+```{r}
+#| label: libraries
+#| echo: false
+#| warning: false
+#| message: false
+
+library(sf)
+library(tidyverse)
+library(readxl)
+library(leaflet)
+library(htmltools)
+```
+
+```{r}
+#| label: warehouse data
+#| echo: false
+#| warning: false
+#| message: false
+
+WH.url <- 'https://raw.githubusercontent.com/RadicalResearchLLC/WarehouseMap/main/WarehouseCITY/geoJSON/finalParcels.geojson'
+warehouses <- st_read(WH.url, quiet = TRUE) %>% 
+  filter(county %in% c('Riverside','San Bernardino')) %>% 
+  st_transform("+proj=longlat +ellps=WGS84 +datum=WGS84") %>% 
+  mutate(yr_bin = ifelse(year_built < 2010, 'pre-2010', 'post-2010')) %>% 
+  select(apn, shape_area, county, yr_bin, geometry) %>% 
+  mutate(yr_bin = as.factor(yr_bin))
+
+```
+
+```{r}
+#| label: jurisdiction data
+#| echo: false
+#| warning: false
+#| message: false
+
+jurisdictions <- st_read(dsn = 'jurisdictions.geojson', quiet = TRUE) %>% 
+  filter(lsad == 25 | name == 'MarchJPA') %>% 
+  st_transform("+proj=longlat +ellps=WGS84 +datum=WGS84")
+
+areaValue2 <- st_area(jurisdictions)
+
+juris2 <- jurisdictions %>% 
+  mutate(area = as.numeric(areaValue2*10.7639))
+
+```
+
+```{r}
+#| label: munge data 1
+#| echo: false
+#| warning: false
+#| message: false
+
+warehouse_jurisdiction_yrBin <- juris2 %>% 
+  st_make_valid() %>% 
+  st_join(warehouses, left = TRUE) %>% 
+  st_set_geometry(value = NULL) %>% 
+  group_by(name, yr_bin) %>% 
+  summarize(count = n(), footprint = sum(shape_area, na.rm = T),
+            area = median(area), .groups = 'drop') %>%
+  filter(footprint > 0) %>% 
+  arrange(desc(footprint)) %>% 
+  mutate(pctwH = round(100*footprint/area, 1))
+
+warehouse_jurisdiction<- warehouse_jurisdiction_yrBin %>% 
+  group_by(name) %>% 
+  summarize(countAll = sum(count, na.rm = T), footAll = sum(footprint, na.rm = T),
+            area = median(area), pctWH_All = sum(pctwH, na.rm = T)) %>% 
+  arrange(desc(footAll)) 
+
+maxValues <- warehouse_jurisdiction %>% 
+  summarize(maxCount = max(countAll), maxFoot = max(footAll), maxPct = max(pctWH_All))
+
+wh_ranks <- warehouse_jurisdiction %>% 
+  mutate(rankCount = countAll/maxValues$maxCount,
+         rankFoot = footAll/maxValues$maxFoot,
+         rankPct = pctWH_All/maxValues$maxPct) %>% 
+  mutate(rank2 = rankFoot*0.5 + rankPct*0.333 + rankCount*0.167) %>% 
+  arrange(desc(rank2)) %>% 
+  slice(1:15) %>% 
+  mutate(rank = row_number()) %>% 
+  mutate(foots1 = round(footAll, - 5), length = str_length(foots1)) %>%
+  mutate(foots = ifelse(length == 9,
+                        paste0(str_sub(foots1, 1, 3), ',000,000'),
+                        paste0(str_sub(foots1, 1,2), ',', str_sub(foots1, 3,3), '00,000'))
+  )
+  
+ # mutate(name = str_replace(name, 'MarchJPA', 'March JPA'))
+
+mapJuris <- juris2 %>% 
+  inner_join(wh_ranks) %>% 
+  st_make_valid() %>% 
+  mutate(name = str_replace(name, 'MarchJPA', 'March JPA'))
+
+jurisCenter <- mapJuris %>% 
+  st_centroid() %>% 
+  mutate(label2 = str_c('#', rank, ' ', name))
+
+```
+
+
+```{r}
+#| label: Map of warehouses
+#| echo: false
+#| warning: false
+#| message: false
+#| column: page
+
+palBin <- colorFactor(palette = c('#fd8d3c', '#bd0026'), domain = warehouses$yr_bin, reverse = TRUE)
+
+leaflet() %>% 
+  addTiles() %>% 
+  setView(lat = 34, lng = -117.3, zoom = 10) %>% 
+  addProviderTiles(provider = providers$Esri.WorldGrayCanvas, group ='Basemap') %>%
+  addProviderTiles(provider = providers$Esri.WorldImagery, group = 'Satellite') %>% 
+  addLayersControl(baseGroups = c('Basemap', 'Satellite'),
+                   overlayGroups = c('Jurisdictions', 'Warehouses', 'Labels'),
+                   options =layersControlOptions(collapsed = FALSE)) %>% 
+  addPolygons(data = mapJuris, 
+              color = 'black',
+              fillColor = 'grey',
+              fillOpacity = 0.1,
+              weight = 2,
+              group = 'Jurisdictions',
+              label = ~htmlEscape(paste0(countAll, ' warehouses, ', foots, ' square feet, and ',
+                     pctWH_All, '% of land.')) ) %>% 
+  addLabelOnlyMarkers(data = jurisCenter,
+                     label = ~label2,
+                    labelOptions = labelOptions(noHide = T, 
+                                       direction = 'bottom',
+                                       textsize = '10px'),
+                    group = 'Labels') %>% 
+    addPolygons(data = warehouses,
+              color = ~palBin(yr_bin),
+              fillOpacity = 0.5,
+              weight = 0.5,
+              group = 'Warehouses') %>%
+    addLegend(data = warehouses,
+              title = 'Warehouse Built',
+              values = ~yr_bin,
+              pal = palBin)
+
+```
+
+
+## Methods
+
+Warehouse sizes and locations based on WarehouseCITY v1.10 dataset.
+
+Jurisdictional ranks are based on three factors.
+
+-   Warehouse footprint (50%)
+-   Percent of jurisdiction covered by warehouses (33.3%)
+-   Count of warehouses (16.7%)
+
+Data is freely available upon request.
+
+## Attribution
+
+This image is brought to you by [Riverside Neighbors Opposing Warehouses](tinyurl.com/rivnow).
+
+![RNOW](www/RNOW.jpg){width="200"}
