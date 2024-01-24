@@ -1,0 +1,215 @@
+---
+title: "Inland Empire Jurisdictions - Warehouse Rankings 2023"
+format: html
+project: 
+ type: website
+ output-dir: docs
+---
+
+```{r}
+#| label: libraries
+#| echo: false
+#| warning: false
+#| message: false
+
+library(sf)
+library(tidyverse)
+library(readxl)
+library(leaflet)
+library(htmltools)
+```
+
+```{r}
+#| label: warehouse data
+#| echo: false
+#| warning: false
+#| message: false
+
+WH.url <- 'https://raw.githubusercontent.com/RadicalResearchLLC/WarehouseMap/main/WarehouseCITY/geoJSON/comboFinal.geojson'
+warehouses <- st_read(WH.url, quiet = TRUE)  |>  
+  filter(county %in% c('Riverside','San Bernardino')) |> 
+  st_transform("+proj=longlat +ellps=WGS84 +datum=WGS84") |> 
+ # mutate(yr_bin = ifelse(year_built < 2010, 'pre-2010', 'post-2010')) |> 
+  select(apn, shape_area, county, category, geometry) #|> 
+  #mutate(yr_bin = as.factor(yr_bin))
+
+```
+
+```{r}
+#| label: jurisdiction data
+#| echo: false
+#| warning: false
+#| message: false
+
+#jurisdictions <- st_read(dsn = 'jurisdictions.geojson', quiet = TRUE) |> 
+#  filter(lsad == 25 | name == 'MarchJPA') |> 
+#  st_transform("+proj=longlat +ellps=WGS84 +datum=WGS84")
+
+jurisdictions <- st_read(dsn = 'SoCal_jurisdictions.geojson', quiet = TRUE) |> 
+  filter(COUNTY_NAME %in% c('Riverside', 'San Bernardino')) |> 
+  st_transform("+proj=longlat +ellps=WGS84 +datum=WGS84")
+
+areaValue2 <- st_area(jurisdictions)
+
+juris2 <- jurisdictions |> 
+  mutate(area = as.numeric(areaValue2*10.7639)) |> 
+  janitor::clean_names()
+
+```
+
+```{r}
+#| label: munge data 1
+#| echo: false
+#| warning: false
+#| message: false
+
+warehouse_jurisdiction_yrBin <- juris2 |> 
+  st_make_valid() |> 
+  st_join(warehouses, left = TRUE) |> 
+  st_set_geometry(value = NULL) |> 
+  group_by(name, category) |> 
+  summarize(count = n(), footprint = sum(shape_area, na.rm = T),
+            area = median(area), .groups = 'drop') |>
+  filter(footprint > 0) |> 
+  arrange(desc(footprint)) |> 
+  mutate(pctwH = round(100*footprint/area, 1))
+
+warehouse_jurisdiction<- warehouse_jurisdiction_yrBin |> 
+  group_by(name) |> 
+  summarize(countAll = sum(count, na.rm = T), footAll = sum(footprint, na.rm = T),
+            area = median(area), pctWH_All = sum(pctwH, na.rm = T)) |> 
+  arrange(desc(footAll)) 
+
+maxValues <- warehouse_jurisdiction |> 
+  summarize(maxCount = max(countAll), maxFoot = max(footAll), maxPct = max(pctWH_All))
+
+wh_ranks <- warehouse_jurisdiction |> 
+  mutate(rankCount = countAll/maxValues$maxCount,
+         rankFoot = footAll/maxValues$maxFoot,
+         rankPct = pctWH_All/maxValues$maxPct) |> 
+  mutate(rank2 = rankFoot*0.6 + rankPct*0.4) |> 
+  arrange(desc(rank2)) |> 
+  slice(1:20) |> 
+  mutate(rank = row_number()) |> 
+  mutate(foots1 = round(footAll, - 5), length = str_length(foots1)) |>
+  mutate(foots = ifelse(length == 9,
+                        paste0(str_sub(foots1, 1, 3), ',000,000'),
+                        paste0(str_sub(foots1, 1,2), ',', str_sub(foots1, 3,3), '00,000'))
+  )
+  
+ # mutate(name = str_replace(name, 'MarchJPA', 'March JPA'))
+
+mapJuris <- juris2 |> 
+  inner_join(wh_ranks) |> 
+  st_make_valid() |> 
+  mutate(name = str_replace(name, 'March ARB', 'March JPA'))
+
+jurisCenter <- mapJuris |> 
+  st_centroid() |> 
+  mutate(label2 = str_c('#', rank, ' ', name))
+
+## WH Jurisdiction by category
+
+whFootprintWide <- warehouse_jurisdiction_yrBin |> 
+  select(name, category, footprint) |> 
+  pivot_wider(names_from= 'category', values_from = 'footprint') |> 
+  rename(Planned.and.Approved = 'Planned and Approved')
+
+wh_ranks2 <- left_join(wh_ranks, whFootprintWide) 
+
+```
+
+@fig-WarehouseMap shows an interactive map of Jurisdictions and the relative ranking of warehouse land uses in the Inland Empire.  
+
+```{r}
+#| label: fig-WarehouseMap
+#| echo: false
+#| warning: false
+#| message: false
+#| column: page
+#| fig-cap: Warehouse locations and municipality ranks for warehouse land-use in the Inland Empire
+
+palBin <- colorFactor(palette = c('red', 'black'), domain = warehouses$category)
+
+leaflet() |> 
+  addTiles() |> 
+  setView(lat = 34, lng = -117.3, zoom = 10) |> 
+  addProviderTiles(provider = providers$Esri.WorldGrayCanvas, group ='Basemap') |>
+  addProviderTiles(provider = providers$Esri.WorldImagery, group = 'Satellite') |> 
+  addLayersControl(baseGroups = c('Basemap', 'Satellite'),
+                   overlayGroups = c('Jurisdictions', 'Warehouses', 'Labels'),
+                   options =layersControlOptions(collapsed = FALSE)) |> 
+  addPolylines(data = mapJuris, 
+              color = 'black',
+              #fillColor = 'grey',
+              #fillOpacity = 0.1,
+              weight = 2,
+              group = 'Jurisdictions',
+              label = ~htmlEscape(paste0(countAll, ' warehouses, ', foots, ' square feet, and ',
+                     pctWH_All, '% of land.')) ) |> 
+  addLabelOnlyMarkers(data = jurisCenter,
+                     label = ~label2,
+                    labelOptions = labelOptions(noHide = T, 
+                                       direction = 'left',
+                                       textsize = '8px',
+                                       textOnly = F),
+                    group = 'Labels') |> 
+    addPolygons(data = warehouses,
+              color = ~palBin(category),
+              fillOpacity = 0.7,
+              weight = 0.5,
+              group = 'Warehouses') |>
+    addLegend(data = warehouses,
+              title = 'Warehouse Category',
+              values = ~category,
+              pal = palBin,
+              position = 'bottomleft')
+
+```
+
+### Total Warehouse Footprints by Municipality - Top 20
+
+@fig-Colplot shows the top 20 warehouse municipalities in the Inland Empire. 
+
+```{r}
+#| label: fig-Colplot 
+#| echo: false
+#| warning: false
+#| message: false
+#| column: page
+#| fig-cap: Total warehouse footprint in square feet by jurisdiction in 2023.  The planned and approved warehouse estimates are based on CEQA environmental documents for warehouse projects not yet built.  
+
+wh_ranks2 |> 
+  select(name, Existing, Planned.and.Approved, rankFoot) |> 
+  pivot_longer(names_to = 'type', values_to = 'footprint', cols = 2:3) |> 
+  mutate(name = ifelse(name == 'March ARB', 'March JPA', name)) |> 
+ggplot() +
+  geom_col(aes(y = reorder(name, rankFoot), x = footprint, fill = type),
+           position = position_stack(reverse = TRUE)) +
+  theme_bw() +
+  labs(x = 'Warehouse footprint (SQ FT)', y = '') +
+  scale_x_continuous(labels = scales::comma_format(),
+                     breaks = c(0, 50000000, 100000000, 150000000, 200000000, 250000000)) +
+  scale_fill_manual(values = c('darkred', 'black', name = NULL)) +
+  theme(legend.position = 'top')
+
+
+
+```
+
+
+### Methods
+
+Jurisdictional ranks are based on two factors.
+
+-   Warehouse footprint (60%)
+-   Percent of jurisdiction covered by warehouses (40%)
+
+
+### Attribution
+
+This analysis is brought to you by [Riverside Neighbors Opposing Warehouses](https://sites.google.com/view/rivnow/home) and the [Robert Redford Conservancy for Southern California Sustainability](https://www.pitzer.edu/redfordconservancy/).   
+
+![](www/RNOW2.png){width="200"}
+![](www/Logo_Redford.jpg){width="200"}
+
