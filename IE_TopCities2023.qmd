@@ -117,6 +117,16 @@ whFootprintWide <- warehouse_jurisdiction_yrBin |>
 
 wh_ranks2 <- left_join(wh_ranks, whFootprintWide) 
 
+## WH Land Use ranks 
+
+whPctWide <- warehouse_jurisdiction_yrBin |> 
+  select(name, category, pctwH) |> 
+  pivot_wider(names_from= 'category', values_from = 'pctwH') |> 
+  rename(Planned.and.Approved = 'Planned and Approved')
+
+wh_ranks3 <- left_join(wh_ranks, whPctWide) 
+
+
 ```
 
 @fig-WarehouseMap shows an interactive map of Jurisdictions and the relative ranking of warehouse land uses in the Inland Empire.  
@@ -169,7 +179,7 @@ leaflet() |>
 
 ### Total Warehouse Footprints by Municipality - Top 20
 
-@fig-Colplot shows the top 20 warehouse municipalities in the Inland Empire. 
+@fig-Colplot shows the top 20 warehouse municipalities in the Inland Empire. @fig-area shows the same 20 warehouse municipalities ordered by the percent of land-use dedicated to warehousing.
 
 ```{r}
 #| label: fig-Colplot 
@@ -190,9 +200,33 @@ ggplot() +
   labs(x = 'Warehouse footprint (SQ FT)', y = '') +
   scale_x_continuous(labels = scales::comma_format(),
                      breaks = c(0, 50000000, 100000000, 150000000, 200000000, 250000000)) +
-  scale_fill_manual(values = c('darkred', 'black', name = NULL)) +
+  scale_fill_manual(values = c('red', 'black', name = NULL)) +
   theme(legend.position = 'top')
 
+
+```
+
+```{r}
+#| label: fig-area 
+#| echo: false
+#| warning: false
+#| message: false
+#| column: page
+#| fig-cap: Total warehouse percentage of land by jurisdiction in 2023.  The planned and approved warehouse estimates are based on CEQA environmental documents for warehouse projects not yet built.  
+
+wh_ranks3 |> 
+  select(name, Existing, Planned.and.Approved, rankPct) |> 
+  pivot_longer(names_to = 'type', values_to = 'pctWH', cols = 2:3) |> 
+  mutate(name = ifelse(name == 'March ARB', 'March JPA', name)) |> 
+ggplot() +
+  geom_col(aes(y = reorder(name, rankPct), x = pctWH, fill = type),
+           position = position_stack(reverse = TRUE)) +
+  theme_bw() +
+  labs(x = 'Warehouse land-use (%)', y = '') +
+  scale_x_continuous(labels = scales::comma_format(),
+                     breaks = c(0, 5, 10, 15, 20, 25)) +
+  scale_fill_manual(values = c('red', 'black', name = NULL)) +
+  theme(legend.position = 'top')
 
 
 ```
