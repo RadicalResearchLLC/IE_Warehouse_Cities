@@ -33,6 +33,10 @@ warehouses <- st_read(WH.url, quiet = TRUE)  |>
   select(apn, shape_area, county, category, geometry) #|> 
   #mutate(yr_bin = as.factor(yr_bin))
 
+wh_centroid <- warehouses |> 
+  st_centroid()
+
+
 ```
 
 ```{r}
@@ -47,11 +51,22 @@ warehouses <- st_read(WH.url, quiet = TRUE)  |>
 
 jurisdictions <- st_read(dsn = 'SoCal_jurisdictions.geojson', quiet = TRUE) |> 
   filter(COUNTY_NAME %in% c('Riverside', 'San Bernardino')) |> 
-  st_transform("+proj=longlat +ellps=WGS84 +datum=WGS84")
+  st_transform("+proj=longlat +ellps=WGS84 +datum=WGS84") |> 
+  select(NAME)
 
-areaValue2 <- st_area(jurisdictions)
+sphereOfInfluence <- st_read(dsn = 'C:/Dev/CA_spatial_data/RivCO/City_Spheres_of_Influence.geojson', quiet = TRUE) |> 
+  st_transform(crs = 4326) |> 
+  filter(SPHERENAME %in% c('BANNING', 'BEAUMONT')) |> 
+  mutate(NAME = str_to_title(SPHERENAME)) |> 
+  select(NAME)
 
-juris2 <- jurisdictions |> 
+jurisdictions3 <- bind_rows(jurisdictions, sphereOfInfluence)  |> 
+  group_by(NAME) |> 
+  summarize()
+
+areaValue2 <- st_area(jurisdictions3)
+
+juris2 <- jurisdictions3 |> 
   mutate(area = as.numeric(areaValue2*10.7639)) |> 
   janitor::clean_names()
 
@@ -65,7 +80,7 @@ juris2 <- jurisdictions |>
 
 warehouse_jurisdiction_yrBin <- juris2 |> 
   st_make_valid() |> 
-  st_join(warehouses, left = TRUE) |> 
+  st_join(wh_centroid, left = TRUE) |> 
   st_set_geometry(value = NULL) |> 
   group_by(name, category) |> 
   summarize(count = n(), footprint = sum(shape_area, na.rm = T),
@@ -212,7 +227,7 @@ ggplot() +
 #| warning: false
 #| message: false
 #| column: page
-#| fig-cap: Total warehouse percentage of land by jurisdiction in 2023.  The planned and approved warehouse estimates are based on CEQA environmental documents for warehouse projects not yet built.  
+#| fig-cap: Total warehouse percentage of land by jurisdiction in 2023.  The planned and approved warehouse estimates are based on CEQA environmental documents for warehouse projects not yet built. Note that spatial joins may include warehouses that are in adjacent jurisdictions - this is important for smaller jurisdictions with large numbers of adjacent warehouse neighbors like Bloomington.  
 
 wh_ranks3 |> 
   select(name, Existing, Planned.and.Approved, rankPct) |> 
@@ -238,6 +253,8 @@ Jurisdictional ranks are based on two factors.
 
 -   Warehouse footprint (60%)
 -   Percent of jurisdiction covered by warehouses (40%)
+
+Note that Beaumont and Banning include planned sphere of influence annexation areas currently listed on CEQANET as warehouse developments.  
 
 
 ### Attribution
